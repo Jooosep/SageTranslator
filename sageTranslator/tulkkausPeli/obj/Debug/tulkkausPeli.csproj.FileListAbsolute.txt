@@ -1,0 +1,7 @@
+C:\Users\joose\source\repos\tulkkausPeli\tulkkausPeli\bin\Debug\tulkkausPeli.exe.config
+C:\Users\joose\source\repos\tulkkausPeli\tulkkausPeli\bin\Debug\tulkkausPeli.exe
+C:\Users\joose\source\repos\tulkkausPeli\tulkkausPeli\bin\Debug\tulkkausPeli.pdb
+C:\Users\joose\source\repos\tulkkausPeli\tulkkausPeli\obj\Debug\tulkkausPeli.csprojAssemblyReference.cache
+C:\Users\joose\source\repos\tulkkausPeli\tulkkausPeli\obj\Debug\tulkkausPeli.csproj.CoreCompileInputs.cache
+C:\Users\joose\source\repos\tulkkausPeli\tulkkausPeli\obj\Debug\tulkkausPeli.exe
+C:\Users\joose\source\repos\tulkkausPeli\tulkkausPeli\obj\Debug\tulkkausPeli.pdb
