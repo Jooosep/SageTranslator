@@ -1,0 +1,7 @@
+C:\Users\Joosep\source\repos\SageTranslator\SageTranslator\sageTranslator\tulkkausPeli\bin\Release\tulkkausPeli.exe.config
+C:\Users\Joosep\source\repos\SageTranslator\SageTranslator\sageTranslator\tulkkausPeli\bin\Release\tulkkausPeli.exe
+C:\Users\Joosep\source\repos\SageTranslator\SageTranslator\sageTranslator\tulkkausPeli\bin\Release\tulkkausPeli.pdb
+C:\Users\Joosep\source\repos\SageTranslator\SageTranslator\sageTranslator\tulkkausPeli\obj\Release\tulkkausPeli.csprojAssemblyReference.cache
+C:\Users\Joosep\source\repos\SageTranslator\SageTranslator\sageTranslator\tulkkausPeli\obj\Release\tulkkausPeli.csproj.CoreCompileInputs.cache
+C:\Users\Joosep\source\repos\SageTranslator\SageTranslator\sageTranslator\tulkkausPeli\obj\Release\tulkkausPeli.exe
+C:\Users\Joosep\source\repos\SageTranslator\SageTranslator\sageTranslator\tulkkausPeli\obj\Release\tulkkausPeli.pdb

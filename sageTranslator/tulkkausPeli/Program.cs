@@ -1,110 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
 using System.Threading;
-
+using System.Globalization;
 
 namespace tulkkausPeli
 {
-    
-    public static class InputExtensions
-    {
-        public static int LimitToRange(
-            this int value, int inclusiveMinimum, int inclusiveMaximum)
-        {
-            if (value < inclusiveMinimum) { return inclusiveMinimum; }
-            if (value > inclusiveMaximum) { return inclusiveMaximum; }
-            return value;
-        }
-
-        private static Random shuffleRng = new Random();
- 
-        public static void Shuffle<T>(this IList<T> list)
-        {
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-            // the code that you want to measure comes here
-            
-            int n = list.Count;
-            while (n > 1)
-            {
-                n--;
-                int k = shuffleRng.Next(n + 1);
-                T value = list[k];
-                list[k] = list[n];
-                list[n] = value;
-            }
-
-            watch.Stop();
-            var elapsedMs = watch.ElapsedMilliseconds;
-
-            int debug  = 900;
-        }
-    }
-    public class Dictionary
-    {
-        public string source;
-        public string dest;
-        public List<Tuple<string, string>> words;
-        public List<string> sourceWords;
-        public List<string> destWords;
-
-        public Dictionary(string src, string dst)
-        {
-            source = src;
-            dest = dst;
-            words = new List<Tuple<string, string>>();
-        }
-        public override string ToString()
-        {
-            string description = "source language: " + source + "\n"
-                + "destination language: " + dest + "\n"
-                + "dictionary length: " + sourceWords.Count + " words\n";
-            return description;
-        }
-    }
-    public class FallingWord
-    {
-        public string originalWord;
-        public string translatedWord;
-        public string hint;
-        public string writeStr;
-        public bool hasBeenTranslated;
-        public int xPos;
-        public decimal yPos;
-        public decimal fallVelocity;
-        public int YPos
-        {
-            get
-            {
-                return Decimal.ToInt32(Math.Round(yPos, 0, MidpointRounding.AwayFromZero));
-            }
-
-        }
-
-        public FallingWord(string word, string translated, decimal speed, string hintStr)
-        {
-            originalWord = word;
-            translatedWord = translated;
-            fallVelocity = speed;
-            hasBeenTranslated = false;
-            hint = hintStr;
-            writeStr = originalWord + hintStr;
-        }
-        public void Activate(int xPosition)
-        {
-            xPos = xPosition;
-            yPos = 3;
-        }
-        public void Morph(string word, string translated)
-        {
-            originalWord = word;
-            translatedWord = translated;
-        }
-    }
 
     class Program
     {
@@ -145,34 +47,59 @@ namespace tulkkausPeli
 
         };
 
+        private static readonly string[] settingsFileInstructionalText = {"#Here you can set wordInterval in ms, for example <wordInterval=10000>, default is 5000, min 1000",
+                                                            "#fallSpeed in a decimal number with one decimal, e.g. <fallSpeed=0.1>, default is 0.2, max 1.0",
+                                                            "#lives at the start of a game, e.g. <lives=20>, default is 10",
+                                                            "#max words during single game, e.g. <maxWords=50>, default is 100"};
+        private enum HintType
+        {
+            None,
+            NoHint,
+            OneLetter,
+            TwoLetters,
+            Length
+        }
+
+        private static HintType currentHintType = HintType.None;
+
         private static List<string[]> countdownList = new List<string[]>();
-        private static List<Dictionary> allDictionaries = new List<Dictionary>();
-        private static Dictionary selectedDictionary = null;
-        private static bool reverseDictionary = false;
-        private static readonly object balanceLock = new object();
+        
+        private static readonly object writeToConsoleLock = new object();
+
         private static readonly System.ConsoleColor baseTextColor = ConsoleColor.White;
         private static readonly System.ConsoleColor translatedTextColor = ConsoleColor.Green;
+
         private static List<Tuple<string, string, string>> currentWordList = new List<Tuple<string, string, string>>();
         private static Queue<FallingWord> wordQueue = new Queue<FallingWord>();
         private static List<FallingWord> activeWords = new List<FallingWord>();
         private static List<Tuple<string, string, bool>> processedWords = new List<Tuple<string, string, bool>>();
-        private static Random rand = new Random();
+        private static List<Dictionary> allDictionaries = new List<Dictionary>();
+        private static Dictionary selectedDictionary = null;
+
+        private static readonly Random rand = new Random();
         private static int w = Console.WindowWidth;
         private static int h = Console.WindowHeight;
+
         private static bool launchNewWord = false;
         private static bool gamePaused = false;
-        private static bool repeatWithSameWords;
+        private static bool repeatWithSameWords = false;
         private static bool quitGame = false;
         private static bool endGameTrigger = false;
+        private static bool reverseDictionary = false;
+
         private static int wordsToPlay = 100;
-        private static readonly decimal baseSpeed = 0.2m;
+        private static decimal baseSpeed = 0.2m;
+        private static int startingLives = 10;
+        private static int wordInterval = 5000;
+
         private static System.Timers.Timer gameUpdateTimer;
         private static System.Timers.Timer newWordTimer;
 
+        private static OptionsMenu dictionarySelector;
         private static int livesLeft;
         private static int score;
 
-        //winapi functions to move console window
+        //winapi functions to move console window and other windows functions
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern IntPtr GetConsoleWindow();
 
@@ -184,15 +111,59 @@ namespace tulkkausPeli
         const int VK_RETURN = 0x0D;
         const int WM_KEYDOWN = 0x100;
 
-        private enum HintType
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool GetConsoleMode(
+            IntPtr hConsoleHandle,
+            out int lpMode);
+
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetStdHandle(int nStdHandle);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool SetConsoleMode(
+            IntPtr hConsoleHandle,
+            int ioMode);
+
+        const int QuickEditMode = 64;
+
+        const int ExtendedFlags = 128;
+
+        const int STD_INPUT_HANDLE = -10;
+
+
+        private static void DisableQuickEdit()
         {
-            None,
-            NoHint,
-            OneLetter,
-            TwoLetters,
-            Length
+            IntPtr consoleHandle = GetStdHandle(STD_INPUT_HANDLE);
+            if (!GetConsoleMode(consoleHandle, out int mode))
+            {
+                Console.WriteLine(Marshal.GetLastWin32Error());
+                throw new Exception();
+            }
+            
+            mode = mode & ~(QuickEditMode | ExtendedFlags);
+
+            if (!SetConsoleMode(consoleHandle, mode))
+            {
+                Console.WriteLine("error");
+                // error setting console mode.
+            }
         }
-        private static HintType currentHintType = HintType.None;
+
+        private static int PollNumber(int min, int max)
+        {
+            
+            while (true)
+            {
+                var key = Console.ReadKey(true);
+                if(int.TryParse(key.KeyChar.ToString(), out int num))
+                {
+                    if (num >= min && num <= max)
+                    {
+                        return num;
+                    }
+                }
+            }
+        }
 
         private static void GameUpdate(Object source, System.Timers.ElapsedEventArgs e)
         {
@@ -203,7 +174,7 @@ namespace tulkkausPeli
             }
             w = Console.WindowWidth;
             h = Console.WindowHeight;
-            lock (balanceLock)
+            lock (writeToConsoleLock)
             {
                 if (launchNewWord && wordQueue.Count > 0)
                 {
@@ -247,6 +218,14 @@ namespace tulkkausPeli
                         WriteUI();
                         if (livesLeft < 1)
                         {
+                            foreach (var word in activeWords)
+                            {
+                                if (word.hasBeenTranslated)
+                                {
+                                    processedWords.Add(new Tuple<string, string, bool>(word.originalWord, word.translatedWord, word.hasBeenTranslated));
+                                }
+
+                            }
                             endGameTrigger = true;
                             var hWnd = System.Diagnostics.Process.GetCurrentProcess().MainWindowHandle;
                             PostMessage(hWnd, WM_KEYDOWN, VK_RETURN, 0);
@@ -268,8 +247,10 @@ namespace tulkkausPeli
 
         private static void LaunchWord(Object source, System.Timers.ElapsedEventArgs e)
         {
-            launchNewWord = true;
-            
+            if (!gamePaused)
+            {
+                launchNewWord = true;
+            }
         }
         public static void WriteXY(int x, int y, string str, System.ConsoleColor color)
         {
@@ -320,74 +301,20 @@ namespace tulkkausPeli
         }
         public static void WriteUI()
         {
-            WriteXY(w - 20, 0, "elämät: " + livesLeft, ConsoleColor.Red);
-            WriteXY(w - 40, 0, "pisteet: " + score, ConsoleColor.Green);
+            WriteXY(w - 20, 0, "lives: " + livesLeft, ConsoleColor.Red);
+            WriteXY(w - 40, 0, "score: " + score, ConsoleColor.Green);
         }
-        public static void PrintMenu()
-        {
-            Console.WriteLine("Tervetuloa tulkkauspeliin! Valitse sanakirja syöttämällä sen numero tai sulje ohjelma painamalla ESC-näppäintä.\n");
-            for (int i = 0; i < allDictionaries.Count; i++)
-            {
-                Console.WriteLine("sanakirja numero " + (i + 1) + ":\n");
-                Console.WriteLine(allDictionaries[i].ToString());
-            }
-        }
+
 
         public static void PrintPauseMenu()
         {
-            Console.WriteLine("Peli pysäytetty, syötä numero jatkaaksesi.\n");
-            Console.WriteLine("1: Jatka peliä");
-            Console.WriteLine("2: Lopeta peli");
+            Console.WriteLine("Game paused.\n");
+            Console.WriteLine("1: Resume");
+            Console.WriteLine("2: Quit game");
         }
         public static void PrintScoreMessage()
         {
-            Console.WriteLine("Your score is " + score + ". ");
-            if (score == 0)
-            {
-                //Console.WriteLine("You are an embarrasment to society\n");
-                Console.WriteLine("An attempt was made.\n");
-            }
-            else if(score < 10)
-            {
-                //Console.WriteLine("You = garbage.\n");
-                Console.WriteLine("You have a long ways to go.\n");
-            }
-            else if (score < 20)
-            {
-                Console.WriteLine("You tried, but failed.\n");
-            }
-            else if(score < 30)
-            {
-                Console.WriteLine("You showed heart, but there is lots of room to improve.\n");
-            }
-            else if (score < 50)
-            {
-                Console.WriteLine("You are decently skilled. Keep on improving!\n");
-            }
-            else if (score < 80)
-            {
-                Console.WriteLine("Congratulations! You're pretty good.\n");
-            }
-            else if (score < 100)
-            {
-                Console.WriteLine("Congratulations! You're quite impressive.\n");
-            }
-            else if (score < 150)
-            {
-                Console.WriteLine("Congratulations! You are a master of translation.\n");
-            }
-            else if (score < 190)
-            {
-                Console.WriteLine("All hail the king of translation .\n");
-            }
-            else if (score < 200)
-            {
-                Console.WriteLine("Heavy is the head that encases a golden brain.\n");
-            }
-            else
-            {
-                Console.WriteLine("Hallowed be your name...\n");
-            }
+            Console.WriteLine("Your score is " + score + "/" + processedWords.Count + ". \n");
         }
         public static void EndScreen()
         {
@@ -441,168 +368,351 @@ namespace tulkkausPeli
                     }
                 }
             }
-            
         }
+
         public static void MenuLoop()
         {
-            wordQueue.Clear();
-            activeWords.Clear();
-            processedWords.Clear();
-            currentWordList.Clear();
-            selectedDictionary = null;
-            currentHintType = HintType.None;
-            reverseDictionary = false;
-            PrintMenu();
-            while (selectedDictionary == null)
+            while (true)
             {
+                Console.Clear();
+                Console.WriteLine("Welcome to the speed translation game!");
+                Console.WriteLine("1: Play");
+                Console.WriteLine("2: Instructions");
+                Console.WriteLine("3: Options");
+                Console.WriteLine("4: Quit");
+                int startMenuSelection = PollNumber(1, 4);
 
-                var key = Console.ReadKey(true);
-                int dictIndex;
-
-                if (int.TryParse(key.KeyChar.ToString(), out dictIndex))
+                if (startMenuSelection == 1)
                 {
-                    if (dictIndex <= allDictionaries.Count && dictIndex > 0)
+                    while (true)
                     {
-                        Console.Clear();
-                        Console.WriteLine("Valitsit tämän sanakirjan: ");
-                        Console.WriteLine(allDictionaries[dictIndex - 1].ToString());
-                        while (currentHintType == 0)
+                        int dictIndex = dictionarySelector.Poll();
+                        if (dictIndex == -1)
                         {
-                            Console.WriteLine("Valitse vielä tulkkaussuunta syöttämällä numero.");
-                            Console.WriteLine("1: " + allDictionaries[dictIndex - 1].source + " -> " + allDictionaries[dictIndex - 1].dest);
-                            Console.WriteLine("2: " + allDictionaries[dictIndex - 1].dest + " -> " + allDictionaries[dictIndex - 1].source);
-                            Console.WriteLine("3: palaa takaisin");
-                            var key2 = Console.ReadKey(true);
-                            int dirIndex;
-                            if (int.TryParse(key2.KeyChar.ToString(), out dirIndex))
+                            break;
+                        }
+                        wordQueue.Clear();
+                        activeWords.Clear();
+                        processedWords.Clear();
+                        currentWordList.Clear();
+                        selectedDictionary = null;
+                        currentHintType = HintType.None;
+                        reverseDictionary = false;
+                        while (true)
+                        {
+                            Console.Clear();
+                            Console.WriteLine("Selected dictionary: \n");
+                            Console.WriteLine(allDictionaries[dictIndex].ToString());
+                            Console.WriteLine("Choose which language is source and which is destination");
+                            Console.WriteLine("1: " + allDictionaries[dictIndex].source + " -> " + allDictionaries[dictIndex].dest);
+                            Console.WriteLine("2: " + allDictionaries[dictIndex].dest + " -> " + allDictionaries[dictIndex].source);
+                            Console.WriteLine("3: return");
+                            int selectedOption = PollNumber(1, 3);
+                            if (selectedOption == 1)
                             {
-                                if (dirIndex > 0 && dirIndex < 3)
-                                {
-                                    selectedDictionary = allDictionaries[dictIndex - 1];
-                                    if (dirIndex == 2)
-                                    {
-                                        reverseDictionary = true;
-                                    }
-                                    Console.Clear();
-                                    while (true)
-                                    {
-                                        Console.WriteLine("Valitse toivomasi vihje (vihje esiintyy sanan lopussa sulkujen sisällä.");
-                                        Console.WriteLine("1: ei vihjettä");
-                                        Console.WriteLine("2: ensimmäinen kirjain");
-                                        Console.WriteLine("3: kaksi ensimmäistä kirjainta");
-                                        Console.WriteLine("4: käännöksen merkkijonon pituus");
-                                        var key3 = Console.ReadKey(true);
-                                        int hintIndex;
-                                        if (int.TryParse(key3.KeyChar.ToString(), out hintIndex))
-                                        {
-                                            if (hintIndex > 0 && hintIndex < 5)
-                                            {
-                                                currentHintType = (HintType)(hintIndex);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    
-                                }
-                                else if (dirIndex == 3)
-                                {
-                                    Console.Clear();
-                                    PrintMenu();
-                                    break;
-                                }
+                                reverseDictionary = false;
+                            }
+                            else if (selectedOption == 2)
+                            {
+                                reverseDictionary = true;
+                            }
+                            else
+                            {
+                                break;
                             }
 
+                            Console.Clear();
+                            Console.WriteLine("Choose what type of hint you want (the hint will appear in brackets after the word)");
+                            Console.WriteLine("1: no hint");
+                            Console.WriteLine("2: hint is 1st letter");
+                            Console.WriteLine("3: hint is two 1st letters");
+                            Console.WriteLine("4: hint is string length");
+                            Console.WriteLine("5: return");
+                            int hintIndex = PollNumber(1, 5);
+                            if (hintIndex != 5)
+                            {
+                                currentHintType = (HintType)(hintIndex);
+                                selectedDictionary = allDictionaries[dictIndex];
+                                if (selectedDictionary.words.Count < wordsToPlay)
+                                {
+                                    wordsToPlay = selectedDictionary.words.Count;
+                                }
+                                int iter = 0;
+                                selectedDictionary.words.Shuffle();
+                                foreach (var word in selectedDictionary.words)
+                                {
+                                    if (iter < wordsToPlay)
+                                    {
+                                        if (reverseDictionary)
+                                        {
+                                            string hintStr = "";
+                                            switch (currentHintType)
+                                            {
+                                                case HintType.NoHint:
+                                                    break;
+                                                case HintType.OneLetter:
+                                                    hintStr = "(" + word.Item1.Substring(0, 1) + ")";
+                                                    break;
+                                                case HintType.TwoLetters:
+                                                    if (word.Item1.Length > 1)
+                                                        hintStr = "(" + word.Item1.Substring(0, 2) + ")";
+                                                    break;
+                                                case HintType.Length:
+                                                    hintStr = "(" + word.Item1.Length + ")";
+                                                    break;
+                                            }
+                                            currentWordList.Add(new Tuple<string, string, string>(word.Item2, word.Item1, hintStr));
+                                            wordQueue.Enqueue(new FallingWord(word.Item2, word.Item1, baseSpeed, hintStr));
+                                        }
+                                        else
+                                        {
+                                            string hintStr = "";
+                                            switch (currentHintType)
+                                            {
+                                                case HintType.NoHint:
+                                                    break;
+                                                case HintType.OneLetter:
+                                                    hintStr = "(" + word.Item2.Substring(0, 1) + ")";
+                                                    break;
+                                                case HintType.TwoLetters:
+                                                    if (word.Item2.Length > 1)
+                                                        hintStr = "(" + word.Item2.Substring(0, 2) + ")";
+                                                    break;
+                                                case HintType.Length:
+                                                    hintStr = "(" + word.Item2.Length + ")";
+                                                    break;
+                                            }
+                                            currentWordList.Add(new Tuple<string, string, string>(word.Item1, word.Item2, hintStr));
+                                            wordQueue.Enqueue(new FallingWord(word.Item1, word.Item2, baseSpeed, hintStr));
+                                        }
+                                    }
+                                    else
+                                    {
+                                        break;
+                                    }
+                                    iter++;
+                                }
+                                return;
+                            }
                         }
                     }
+                    
+                    
                 }
-                else if(key.Key == ConsoleKey.Escape)
+                else if (startMenuSelection == 2)
+                {
+                    Console.Clear();
+                    Console.WriteLine("Press any key to return...\n");
+                    Console.WriteLine("Instructions:\n");
+                    Console.WriteLine("When the game starts, words in the chosen source language will start falling from the top of the window.");
+                    Console.WriteLine("Translate the word to the chosen destination language before it reaches the bottom end of the window.");
+                    Console.WriteLine("Simply write the translation and press Enter. If the word you attempted to translate was translated correctly it will turn green and one point will be added to the gamescore.");
+                    Console.WriteLine("The word you are writing will appear at the top left of the window, score and remaining lives will be shown at the top right side.");
+                    Console.WriteLine("The game will end when all lives are lost by letting untranslated words reach the bottom of the window or when there are no more words left to translate");
+                    Console.WriteLine("There are no penalties for attempted translations that fail so you can use the Enter key to quickly clear what you are writing instead of backspace.");
+                    Console.WriteLine("The game can be paused by pressing the ESC key.");
+                    Console.WriteLine("There are two special characters that require ctrl to be pressed. Firstly ü, which appears with ctrl+u and secondly õ, which appears with ctrl+o.");
+                    Console.WriteLine("In the options you can modify some key parameters of the game, namely the amount of lives at the start of the game, the speed of falling words,");
+                    Console.WriteLine("the time-interval between words appearing and the total amount of words to appear during one game.");
+                    Console.ReadKey(true);
+                }
+                else if (startMenuSelection == 3)
+                {
+                    while (true)
+                    {
+                        Console.Clear();
+                        Console.WriteLine("Options: \n");
+                        Console.WriteLine("1: Set lives at the start of the game");
+                        Console.WriteLine("2: Set words falling speed");
+                        Console.WriteLine("3: Set interval between words");
+                        Console.WriteLine("4: Set total words during one game");
+                        Console.WriteLine("5: Return");
+                        int optionsSelection = PollNumber(1, 5);
+                        if (optionsSelection == 1)
+                        {
+                            Console.Clear();
+                            Console.WriteLine("Set amount of lives (min=1), currently " + startingLives);
+                            while (true)
+                            {
+                                Console.SetCursorPosition(0, 1);
+                                if (int.TryParse(Console.ReadLine(), out int newAmountOfLives))
+                                {
+                                    if (newAmountOfLives > 0)
+                                    {
+                                        startingLives = newAmountOfLives;
+                                        break;
+                                    }
+                                    Console.SetCursorPosition(0, 3);
+                                    DeleteWord(0, 3, 30);
+                                    Console.WriteLine("Must be over 0");
+                                }
+                                else
+                                {
+                                    Console.SetCursorPosition(0, 3);
+                                    DeleteWord(0, 3, 30);
+                                    DeleteWord(0, 1, 30);
+                                    Console.WriteLine("Must be an integer.");
+                                }
+                            }
+                        }
+                        else if (optionsSelection == 2)
+                        {
+                            Console.Clear();
+                            Console.WriteLine("Set word falling speed (0.1 - 1.0 with one decimal), currently " + baseSpeed);
+
+                            NumberStyles style = NumberStyles.AllowDecimalPoint;
+                            while (true)
+                            {
+                                Console.SetCursorPosition(0, 1);
+                                if (Decimal.TryParse(Console.ReadLine(), style, CultureInfo.InvariantCulture, out decimal newFallSpeed))
+                                {
+                                    if (newFallSpeed.ToString().Length > 3)
+                                    {
+                                        DeleteWord(0, 3, 30);
+                                        DeleteWord(0, 1, 30);
+                                        Console.SetCursorPosition(0, 3);
+                                        Console.WriteLine("Only one decimal allowed");
+                                    }
+                                    else if (newFallSpeed < 0.0m || newFallSpeed > 1.0m)
+                                    {
+                                        DeleteWord(0, 3, 30);
+                                        DeleteWord(0, 1, 30);
+                                        Console.SetCursorPosition(0, 3);
+                                        Console.WriteLine("Minimum 0.1, maximum 1.0");
+                                    }
+                                    else
+                                    {
+                                        baseSpeed = newFallSpeed;
+                                        break;
+                                    }
+
+                                }
+                                else
+                                {
+                                    DeleteWord(0, 3, 30);
+                                    DeleteWord(0, 1, 30);
+                                    Console.SetCursorPosition(0, 3);
+                                    Console.WriteLine("Must be a decimal.");
+                                }
+                            }
+                        }
+                        else if (optionsSelection == 3)
+                        {
+                            Console.Clear();
+                            Console.WriteLine("Set interval between words in ms (min=1000), currently " + wordInterval);
+
+                            while (true)
+                            {
+                                Console.SetCursorPosition(0, 1);
+                                if (int.TryParse(Console.ReadLine(), out int newInterval))
+                                {
+                                    if (newInterval > 999)
+                                    {
+                                        wordInterval = newInterval;
+                                        newWordTimer = new System.Timers.Timer(wordInterval);
+                                        newWordTimer.Elapsed += LaunchWord;
+                                        newWordTimer.AutoReset = true;
+                                        break;
+                                    }
+                                    DeleteWord(0, 3, 30);
+                                    DeleteWord(0, 1, 30);
+                                    Console.SetCursorPosition(0, 3);
+                                    Console.WriteLine("Must be at least 1000");
+                                }
+                                else
+                                {
+                                    DeleteWord(0, 3, 30);
+                                    DeleteWord(0, 1, 30);
+                                    Console.SetCursorPosition(0, 3);
+                                    Console.WriteLine("Must be an integer.");
+                                }
+                                
+                            }
+                        }
+                        else if (optionsSelection == 4)
+                        {
+                            Console.Clear();
+                            Console.WriteLine("Set amount of total words to appear (min=1), currently " + wordsToPlay);
+                            while (true)
+                            {
+                                Console.SetCursorPosition(0, 1);
+                                if (int.TryParse(Console.ReadLine(), out int newWordTotal))
+                                {
+                                    if (newWordTotal > 0)
+                                    {
+                                        wordsToPlay = newWordTotal;
+                                        break;
+                                    }
+                                    DeleteWord(0, 3, 30);
+                                    DeleteWord(0, 1, 30);
+                                    Console.SetCursorPosition(0, 3);
+                                    Console.WriteLine("Must be over 0");
+                                }
+                                else
+                                {
+                                    
+                                    DeleteWord(0, 3, 30);
+                                    DeleteWord(0, 1, 30);
+                                    Console.SetCursorPosition(0, 3);
+                                    Console.WriteLine("Must be an integer.");
+                                }
+                            }
+                        }
+                        else if (optionsSelection == 5)
+                        {
+                            break;
+                        }
+
+                        string dir = System.IO.Directory.GetCurrentDirectory();
+                        string settingsPath = dir + "\\settings.txt";
+                        using (System.IO.StreamWriter file =
+                        new System.IO.StreamWriter(@settingsPath))
+                        {
+                            foreach (string line in settingsFileInstructionalText)
+                            {
+                                file.WriteLine(line);
+                            }
+                            file.WriteLine("wordInterval=" + wordInterval);
+                            file.WriteLine("fallSpeed=" + baseSpeed);
+                            file.WriteLine("lives=" + startingLives);
+                            file.WriteLine("maxWords=" + wordsToPlay);
+
+                        }
+
+                    }
+                }
+                else
                 {
                     quitGame = true;
                     return;
                 }
             }
-                 
-            int iter = 0;
-            selectedDictionary.words.Shuffle();
-            foreach (var word in selectedDictionary.words)
-            {
-                if (iter < wordsToPlay)
-                {
-                    if (reverseDictionary)
-                    {
-                        string hintStr = "";
-                        switch(currentHintType)
-                        {
-                            case HintType.NoHint:
-                                break;
-                            case HintType.OneLetter:
-                                hintStr = "(" + word.Item1.Substring(0, 1) + ")";
-                                break;
-                            case HintType.TwoLetters:
-                                if(word.Item1.Length > 1)
-                                    hintStr = "(" + word.Item1.Substring(0, 2) + ")";
-                                break;
-                            case HintType.Length:
-                                hintStr = "(" + word.Item1.Length + ")";
-                                break;
-                        }
-                        currentWordList.Add(new Tuple<string, string, string>(word.Item2, word.Item1, hintStr));
-                        wordQueue.Enqueue(new FallingWord(word.Item2, word.Item1, baseSpeed, hintStr));
-                    }
-                    else
-                    {
-                        string hintStr = "";
-                        switch (currentHintType)
-                        {
-                            case HintType.NoHint:
-                                break;
-                            case HintType.OneLetter:
-                                hintStr = "(" + word.Item2.Substring(0, 1) + ")";
-                                break;
-                            case HintType.TwoLetters:
-                                if (word.Item2.Length > 1)
-                                    hintStr = "(" + word.Item2.Substring(0, 2) + ")";
-                                break;
-                            case HintType.Length:
-                                hintStr = "(" + word.Item2.Length + ")";
-                                break;
-                        }
-                        currentWordList.Add(new Tuple<string, string, string>(word.Item1, word.Item2, hintStr));
-                        wordQueue.Enqueue(new FallingWord(word.Item1, word.Item2, baseSpeed, hintStr));
-                    }
-                }
-                else
-                {
-                    break;
-                }
-                iter++;
-            }
-            return;
         }
 
         private static void GameLoop()
         {
-            Thread.Sleep(1000);
-            Console.Clear();
-            launchNewWord = false;
-            newWordTimer.Enabled = true;
-            gameUpdateTimer.Enabled = true;         
 
+            Thread.Sleep(300);
+            Console.Clear();
             foreach (var strArray in countdownList)
             {
-                WriteArray(w / 2, h / 2, strArray, ConsoleColor.Cyan);
+                WriteArray(w / 2, h / 2, strArray, ConsoleColor.Green);
                 Thread.Sleep(1000);
                 Console.Clear();
             }
             
             score = 0;
-            livesLeft = 20;
+            livesLeft = startingLives;
             WriteUI();
 
             while(Console.KeyAvailable)
             {
                 Console.ReadKey(true);
             }
+
+            launchNewWord = true;
+            newWordTimer.Enabled = true;
+            gameUpdateTimer.Enabled = true;
 
             while (true)
             {
@@ -613,7 +723,7 @@ namespace tulkkausPeli
                     var key = Console.ReadKey(true);
                     if (key.Key == ConsoleKey.Enter)
                     {
-                        lock (balanceLock)
+                        lock (writeToConsoleLock)
                         {
                             DeleteWord(0, 0, (guess.Length + 5));
                         }
@@ -670,7 +780,7 @@ namespace tulkkausPeli
                     {
                         guess += key.KeyChar;
                     }
-                    lock (balanceLock)
+                    lock (writeToConsoleLock)
                     {
                         DeleteWord(0, 0, (guess.Length + 5));
                         WriteXY(0, 0, guess, baseTextColor);
@@ -687,14 +797,13 @@ namespace tulkkausPeli
                     {
                         score++;
 
-                        lock (balanceLock)
+                        lock (writeToConsoleLock)
                         {
                             WriteUI();
                         }
                         word.hasBeenTranslated = true;
                     }
                 }
-
             }
         }
 
@@ -717,14 +826,7 @@ namespace tulkkausPeli
 
         static void Main(string[] args)
         {
-            gameUpdateTimer = new System.Timers.Timer(100);
-            gameUpdateTimer.AutoReset = true;
-            gameUpdateTimer.Elapsed += GameUpdate;
-
-            newWordTimer = new System.Timers.Timer(5000);
-            newWordTimer.Elapsed += LaunchWord;
-            newWordTimer.AutoReset = true;
-
+            
             Console.OutputEncoding = System.Text.Encoding.Unicode;
 
             countdownList.Add(countdown3);
@@ -734,53 +836,145 @@ namespace tulkkausPeli
 
             IntPtr ptr = GetConsoleWindow();
             MoveWindow(ptr, 0, 0, 100, 100, true);
-
             Console.SetWindowPosition(0, 0);
+            DisableQuickEdit();
 
             string dir = System.IO.Directory.GetCurrentDirectory();
             //Console.WriteLine(dir);
+            string settingsFilePath = "";
             string[] files = System.IO.Directory.GetFiles(System.IO.Directory.GetCurrentDirectory());
             List<string> dictionaryFiles = new List<string>();
             foreach (var f in files)
             {
                 string[] splitName = f.Split('\\');
                 string fileName = splitName[splitName.Length - 1];
+                if (fileName == "settings.txt")
+                {
+
+                    settingsFilePath = f;
+                }
                 if (fileName.Length > 4 && fileName.EndsWith(".txt") && fileName.Split('.')[0].Split('-').Length > 1 && fileName.Split('.')[0].Split('-')[0].Length > 1 && fileName.Split('.')[0].Split('-')[1].Length > 1)
                 {
                     dictionaryFiles.Add(f);
                     string[] splitPath = f.Split('\\');
                 }
             }
-            //while (true) { };
+
+            if (settingsFilePath.Length > 0)
+            {
+                NumberStyles style = NumberStyles.AllowDecimalPoint;
+                string line;
+                System.IO.StreamReader file = new System.IO.StreamReader(@settingsFilePath);
+                while ((line = file.ReadLine()) != null)
+                {
+                    if (line.Length > 0 && line[0] != '#')
+                    {
+
+                        if (line.Split('=').Length > 0)
+                        {
+                            
+                            if (line.Split('=')[0] == "fallSpeed")
+                            {
+                                string decim = line.Split('=')[1];
+                                if (Decimal.TryParse(line.Split('=')[1], style, CultureInfo.InvariantCulture, out decimal res))
+                                {
+                                    if (res > 0.0m && res <= 1.0m)
+                                    {
+                                        baseSpeed = res;
+                                    }
+                                }
+                            }
+                            if (line.Split('=')[0] == "wordInterval")
+                            {
+                                if (int.TryParse(line.Split('=')[1], out int res))
+                                {
+                                    if (res >= 1000 )
+                                    {
+                                        wordInterval = res;
+                                    }
+                                }
+                            }
+                            if (line.Split('=')[0] == "lives")
+                            {
+                                if (int.TryParse(line.Split('=')[1], out int res))
+                                {
+                                    if (res > 0)
+                                    {
+                                        startingLives = res;
+                                    }
+                                }
+                            }
+                            if (line.Split('=')[0] == "maxWords")
+                            {
+                                if (int.TryParse(line.Split('=')[1], out int res))
+                                {
+                                    if (res > 0)
+                                    {
+                                        wordsToPlay = res;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                file.Close();
+            }
+
             foreach (var dictFile in dictionaryFiles)
             {
                 string[] splitName = dictFile.Split('\\');
+                
                 string fileName = splitName[splitName.Length - 1];
+                
                 string withoutExtension = fileName.Split('.')[0];
                 string src = withoutExtension.Split('-')[0];
                 string dst = withoutExtension.Split('-')[1];
-                Dictionary newDict = new Dictionary(src, dst);
-                newDict.sourceWords = new List<string>();
-                newDict.destWords = new List<string>();
+                Dictionary newDict = new Dictionary(src, dst, "");
+                bool descriptionFound = false;
 
                 string line;
                 System.IO.StreamReader file = new System.IO.StreamReader(@dictFile);
                 while ((line = file.ReadLine()) != null)
                 {
-                    //System.Console.WriteLine(line);
-                    string[] words = line.Split(',');
-                    if (words.Length > 1)
+
+                    if (line.Length > 0 && line[0] != '#')
                     {
-                        newDict.sourceWords.Add(words[0]);
-                        newDict.destWords.Add(words[1]);
-                        newDict.words.Add(new Tuple<string, string>(words[0], words[1]));
+
+                        string[] words = line.Split(',');
+                        if (words.Length > 1 && words[0].Length > 0 && words[1].Length > 0)
+                        {
+                            newDict.words.Add(new Tuple<string, string>(words[0], words[1]));
+                        }
+                    }
+                    else
+                    {
+                        if(line.Length > 1)
+                        {
+                            if(!descriptionFound)
+                            {
+                                descriptionFound = true;
+                            }
+                            newDict.description += line.Split('#')[1];
+                        }
                     }
 
                 }
-                allDictionaries.Add(newDict);
-
+                if (newDict.words.Count > 1)
+                {
+                    allDictionaries.Add(newDict);
+                }
+                if(!descriptionFound)
+                {
+                    newDict.description = "no description found";
+                }
             }
-            
+            string dictMenuTitle = "First choose a dictionary or return with ESC\n";
+            string[] dictionaryOptions = new string[allDictionaries.Count];
+            for (int i = 0; i < allDictionaries.Count; i++)
+            {
+                dictionaryOptions[i] = allDictionaries[i].ToString();
+            }
+            dictionarySelector = new OptionsMenu(dictMenuTitle, dictionaryOptions);
 
             int windowW = Console.LargestWindowWidth;
             int windowH = Console.LargestWindowHeight;
@@ -793,13 +987,19 @@ namespace tulkkausPeli
 
             if (allDictionaries.Count < 1)
             {
-                Console.WriteLine("Sopivia sanakirjatiedostoja ei löytynyt. Etsitään .txt-loppuisia tiedostoja joiden nimi on väliviivalla erotettu lähde- ja kohdekielitunnus, esim. <en-fi.txt>.");
-                Console.WriteLine("Paina Enter poistuaksesi ohjelmasta.");
+                Console.WriteLine("No suitable dictionary files found. Looking for txt-files the name of which is the source and destination language codes separated by a hyphen, e.g. <en-fi.txt>.");
+                Console.WriteLine("Press Enter to exit the program.");
                 Console.ReadLine();
                 return;
             }
 
-            
+            gameUpdateTimer = new System.Timers.Timer(100);
+            gameUpdateTimer.AutoReset = true;
+            gameUpdateTimer.Elapsed += GameUpdate;
+
+            newWordTimer = new System.Timers.Timer(wordInterval);
+            newWordTimer.Elapsed += LaunchWord;
+            newWordTimer.AutoReset = true;
 
             while (true)
             {
