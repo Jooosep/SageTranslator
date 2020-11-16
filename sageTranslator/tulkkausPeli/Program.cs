@@ -46,11 +46,23 @@ namespace tulkkausPeli
             "        \\/         \\/ "
 
         };
+        private static readonly string[] instructionLines =
+        {
+            "When the game starts, words in the chosen source language will start falling from the top of the window.",
+            "Translate the word to the chosen destination language before it reaches the bottom end of the window.",
+            "Simply write the translation and press Enter. If the word you attempted to translate was translated correctly it will turn green and one point will be added to the gamescore.",
+            "The word you are writing will appear at the top left of the window, score and remaining lives will be shown at the top right side.",
+            "The game will end when all lives are lost by letting untranslated words reach the bottom of the window or when there are no more words left to translate.",
+            "There are no penalties for attempted translations that fail so you can use the Enter key to quickly clear what you are writing instead of backspace.",
+            "The game can be paused by pressing the ESC key.",
+            "There are two special characters that require ctrl to be pressed. Firstly ü, which appears with ctrl+u and secondly õ, which appears with ctrl+o.",
+            "In the options you can modify some key parameters of the game: amount of lives, word falling speed, word interval and total words."
+        };
 
         private static readonly string[] settingsFileInstructionalText = {"#Here you can set wordInterval in ms, for example <wordInterval=10000>, default is 5000, min 1000",
                                                             "#fallSpeed in a decimal number with one decimal, e.g. <fallSpeed=0.1>, default is 0.2, max 1.0",
                                                             "#lives at the start of a game, e.g. <lives=20>, default is 10",
-                                                            "#max words during single game, e.g. <maxWords=50>, default is 100"};
+                                                            "#maxWords during single game, e.g. <maxWords=50>, default is 100"};
         private enum HintType
         {
             None,
@@ -66,8 +78,9 @@ namespace tulkkausPeli
         
         private static readonly object writeToConsoleLock = new object();
 
-        private static readonly System.ConsoleColor baseTextColor = ConsoleColor.White;
-        private static readonly System.ConsoleColor translatedTextColor = ConsoleColor.Green;
+        public static readonly System.ConsoleColor baseTextColor = ConsoleColor.White;
+        public static readonly System.ConsoleColor translatedTextColor = ConsoleColor.Green;
+        public static int xMargin = 2;
 
         private static List<Tuple<string, string, string>> currentWordList = new List<Tuple<string, string, string>>();
         private static Queue<FallingWord> wordQueue = new Queue<FallingWord>();
@@ -100,6 +113,10 @@ namespace tulkkausPeli
         private static int score;
 
         //winapi functions to move console window and other windows functions
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetConsoleDisplayMode(out int lpModeFlags);
+
+
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern IntPtr GetConsoleWindow();
 
@@ -308,34 +325,32 @@ namespace tulkkausPeli
 
         public static void PrintPauseMenu()
         {
-            Console.WriteLine("Game paused.\n");
-            Console.WriteLine("1: Resume");
-            Console.WriteLine("2: Quit game");
+            WriteXY(xMargin, 1, "Game paused.", baseTextColor);
+            WriteXY(xMargin, 3, "1: Resume", baseTextColor);
+            WriteXY(xMargin, 4, "2: Quit game", baseTextColor);
         }
-        public static void PrintScoreMessage()
+        public static string GetScoreMessage()
         {
-            Console.WriteLine("Your score is " + score + "/" + processedWords.Count + ". \n");
+            return "Your score is " + score + "/" + processedWords.Count + ".";
         }
         public static void EndScreen()
         {
             Console.Clear();
-            PrintScoreMessage();
-            Console.WriteLine("1: Return to start menu");
-            Console.WriteLine("2: Play again with the same words\n");
-            Console.WriteLine("Here is a list of all of the words that appeared in this game.\n");
-            int cursorY = Console.CursorTop;
-            cursorY += 2;
+            WriteXY(xMargin, 1, GetScoreMessage(), baseTextColor);
+            WriteXY(xMargin, 3, "1: Return to start menu", baseTextColor);
+            WriteXY(xMargin, 4, "2: Play again with the same words", baseTextColor);
+            WriteXY(xMargin, 6, "Here is a list of all of the words that appeared in this game.", baseTextColor);
+            int cursorY = 8;
             int iter = 1;
             foreach (var word in processedWords)
             {
-                
+                ConsoleColor color = baseTextColor;
                 if (word.Item3)
                 {
-                    Console.ForegroundColor = ConsoleColor.Green;
+                    color = ConsoleColor.Green;
                 }
-                Console.SetCursorPosition(5, cursorY);
-                Console.WriteLine(iter + ". " + word.Item1 + " = " + word.Item2);
-                Console.ForegroundColor = baseTextColor;
+                Console.SetCursorPosition(xMargin, cursorY);
+                WriteXY(xMargin, cursorY, iter + ". " + word.Item1 + " = " + word.Item2, color);
                 iter++;
                 cursorY++;
             }
@@ -374,14 +389,24 @@ namespace tulkkausPeli
         {
             while (true)
             {
+                Console.CursorVisible = false;
                 Console.Clear();
-                Console.WriteLine("Welcome to the speed translation game!");
-                Console.WriteLine("1: Play");
-                Console.WriteLine("2: Instructions");
-                Console.WriteLine("3: Options");
-                Console.WriteLine("4: Quit");
-                int startMenuSelection = PollNumber(1, 4);
+                string[] mainMenuLines =
+                {
+                    "Welcome to the speed translation game!",
+                    "",
+                    "1: Play",
+                    "2: Instructions",
+                    "3: Options",
+                    "4: Quit"
+                };
+                for (int i = 0; i < mainMenuLines.Length; i++)
+                {
+                    WriteXY(xMargin, i + 1, mainMenuLines[i], baseTextColor);
+                }
 
+                int startMenuSelection = PollNumber(1, 4);
+                Console.CursorVisible = false;
                 if (startMenuSelection == 1)
                 {
                     while (true)
@@ -391,6 +416,7 @@ namespace tulkkausPeli
                         {
                             break;
                         }
+
                         wordQueue.Clear();
                         activeWords.Clear();
                         processedWords.Clear();
@@ -401,12 +427,20 @@ namespace tulkkausPeli
                         while (true)
                         {
                             Console.Clear();
-                            Console.WriteLine("Selected dictionary: \n");
-                            Console.WriteLine(allDictionaries[dictIndex].ToString());
-                            Console.WriteLine("Choose which language is source and which is destination");
-                            Console.WriteLine("1: " + allDictionaries[dictIndex].source + " -> " + allDictionaries[dictIndex].dest);
-                            Console.WriteLine("2: " + allDictionaries[dictIndex].dest + " -> " + allDictionaries[dictIndex].source);
-                            Console.WriteLine("3: return");
+                            string[] chooseDirLines =
+                            {
+                                "Selected dictionary: " + allDictionaries[dictIndex].description,
+                                "",
+                                "Choose which language is source and which is destination",
+                                "1: " + allDictionaries[dictIndex].source + " -> " + allDictionaries[dictIndex].dest,
+                                "2: " + allDictionaries[dictIndex].dest + " -> " + allDictionaries[dictIndex].source,
+                                "3: return"
+                            };
+                            for (int i = 0; i < chooseDirLines.Length; i++)
+                            {
+                                WriteXY(xMargin, i + 1, chooseDirLines[i], baseTextColor);
+                            }
+
                             int selectedOption = PollNumber(1, 3);
                             if (selectedOption == 1)
                             {
@@ -422,12 +456,20 @@ namespace tulkkausPeli
                             }
 
                             Console.Clear();
-                            Console.WriteLine("Choose what type of hint you want (the hint will appear in brackets after the word)");
-                            Console.WriteLine("1: no hint");
-                            Console.WriteLine("2: hint is 1st letter");
-                            Console.WriteLine("3: hint is two 1st letters");
-                            Console.WriteLine("4: hint is string length");
-                            Console.WriteLine("5: return");
+                            string[] chooseHintLines =
+                            {
+                                "Choose what type of hint you want (the hint will appear in brackets after the word)",
+                                "1: no hint",
+                                "2: hint is first letter",
+                                "3: hint is two first letters",
+                                "4: hint is string length",
+                                "5: return"
+                            };
+                            for (int i = 0; i < chooseHintLines.Length; i++)
+                            {
+                                WriteXY(xMargin, i + 1, chooseHintLines[i], baseTextColor);
+                            }
+
                             int hintIndex = PollNumber(1, 5);
                             if (hintIndex != 5)
                             {
@@ -502,83 +544,96 @@ namespace tulkkausPeli
                 else if (startMenuSelection == 2)
                 {
                     Console.Clear();
-                    Console.WriteLine("Press any key to return...\n");
-                    Console.WriteLine("Instructions:\n");
-                    Console.WriteLine("When the game starts, words in the chosen source language will start falling from the top of the window.");
-                    Console.WriteLine("Translate the word to the chosen destination language before it reaches the bottom end of the window.");
-                    Console.WriteLine("Simply write the translation and press Enter. If the word you attempted to translate was translated correctly it will turn green and one point will be added to the gamescore.");
-                    Console.WriteLine("The word you are writing will appear at the top left of the window, score and remaining lives will be shown at the top right side.");
-                    Console.WriteLine("The game will end when all lives are lost by letting untranslated words reach the bottom of the window or when there are no more words left to translate");
-                    Console.WriteLine("There are no penalties for attempted translations that fail so you can use the Enter key to quickly clear what you are writing instead of backspace.");
-                    Console.WriteLine("The game can be paused by pressing the ESC key.");
-                    Console.WriteLine("There are two special characters that require ctrl to be pressed. Firstly ü, which appears with ctrl+u and secondly õ, which appears with ctrl+o.");
-                    Console.WriteLine("In the options you can modify some key parameters of the game, namely the amount of lives at the start of the game, the speed of falling words,");
-                    Console.WriteLine("the time-interval between words appearing and the total amount of words to appear during one game.");
+                    WriteXY(xMargin, 1, "Press any key to return...", baseTextColor);
+                    WriteXY(xMargin, 3, "Instructions:", baseTextColor);
+
+                    int yPos = 5;
+                    int iter = 1;
+                    foreach (var line in instructionLines)
+                    {
+                        WriteXY(xMargin, yPos,iter + ": " + line, baseTextColor);
+                        yPos++;
+                        iter++;
+                    }
                     Console.ReadKey(true);
                 }
                 else if (startMenuSelection == 3)
                 {
+                    int userResponseLine = 2;
+                    int errorLine = 4;
                     while (true)
                     {
                         Console.Clear();
-                        Console.WriteLine("Options: \n");
-                        Console.WriteLine("1: Set lives at the start of the game");
-                        Console.WriteLine("2: Set words falling speed");
-                        Console.WriteLine("3: Set interval between words");
-                        Console.WriteLine("4: Set total words during one game");
-                        Console.WriteLine("5: Return");
+                        string[] chooseOption =
+                        {
+                            "Options:",
+                            "",
+                            "1: Set lives at the start of the game",
+                            "2: Set word falling speed",
+                            "3: Set interval between words",
+                            "4: Set total words during one game",
+                            "5: Return"
+                        };
+                        for (int i = 0; i < chooseOption.Length; i++)
+                        {
+                            WriteXY(xMargin, i + 1, chooseOption[i], baseTextColor);
+                        }
+
                         int optionsSelection = PollNumber(1, 5);
                         if (optionsSelection == 1)
                         {
                             Console.Clear();
-                            Console.WriteLine("Set amount of lives (min=1), currently " + startingLives);
+                            WriteXY(xMargin, 1 , "Set amount of lives (min=1), currently " + startingLives + ", or return with Enter", baseTextColor);
                             while (true)
                             {
-                                Console.SetCursorPosition(0, 1);
-                                if (int.TryParse(Console.ReadLine(), out int newAmountOfLives))
+                                Console.SetCursorPosition(xMargin, 2);
+                                string input = Console.ReadLine();
+                                if (int.TryParse(input, out int newAmountOfLives))
                                 {
                                     if (newAmountOfLives > 0)
                                     {
                                         startingLives = newAmountOfLives;
                                         break;
                                     }
-                                    Console.SetCursorPosition(0, 3);
-                                    DeleteWord(0, 3, 30);
-                                    Console.WriteLine("Must be over 0");
+                                    DeleteWord(0, errorLine, 30);
+                                    DeleteWord(0, userResponseLine, 30);
+                                    WriteXY(xMargin, errorLine, "Must be over 0", baseTextColor);
                                 }
                                 else
                                 {
-                                    Console.SetCursorPosition(0, 3);
-                                    DeleteWord(0, 3, 30);
-                                    DeleteWord(0, 1, 30);
-                                    Console.WriteLine("Must be an integer.");
+                                    if (input == "")
+                                    {
+                                        break;
+                                    }
+                                    DeleteWord(0, errorLine, 30);
+                                    DeleteWord(0, userResponseLine, 30);
+                                    WriteXY(xMargin, errorLine, "Must be an integer.", baseTextColor);
                                 }
                             }
                         }
                         else if (optionsSelection == 2)
                         {
                             Console.Clear();
-                            Console.WriteLine("Set word falling speed (0.1 - 1.0 with one decimal), currently " + baseSpeed);
+                            WriteXY(xMargin, 1, "Set word falling speed (0.1 - 1.0 with one decimal), currently " + baseSpeed + ", or return with Enter", baseTextColor);
 
                             NumberStyles style = NumberStyles.AllowDecimalPoint;
                             while (true)
                             {
-                                Console.SetCursorPosition(0, 1);
-                                if (Decimal.TryParse(Console.ReadLine(), style, CultureInfo.InvariantCulture, out decimal newFallSpeed))
+                                Console.SetCursorPosition(xMargin, userResponseLine);
+                                string input = Console.ReadLine();
+                                if (Decimal.TryParse(input, style, CultureInfo.InvariantCulture, out decimal newFallSpeed))
                                 {
                                     if (newFallSpeed.ToString().Length > 3)
                                     {
-                                        DeleteWord(0, 3, 30);
-                                        DeleteWord(0, 1, 30);
-                                        Console.SetCursorPosition(0, 3);
-                                        Console.WriteLine("Only one decimal allowed");
+                                        DeleteWord(0, errorLine, 30);
+                                        DeleteWord(0, userResponseLine, 30);
+                                        WriteXY(xMargin, errorLine, "Only one decimal allowed", baseTextColor);
                                     }
-                                    else if (newFallSpeed < 0.0m || newFallSpeed > 1.0m)
+                                    else if (newFallSpeed < 0.1m || newFallSpeed > 1.0m)
                                     {
-                                        DeleteWord(0, 3, 30);
-                                        DeleteWord(0, 1, 30);
-                                        Console.SetCursorPosition(0, 3);
-                                        Console.WriteLine("Minimum 0.1, maximum 1.0");
+                                        DeleteWord(0, errorLine, 30);
+                                        DeleteWord(0, userResponseLine, 30);
+                                        WriteXY(xMargin, errorLine, "Minimum 0.1, maximum 1.0", baseTextColor); 
                                     }
                                     else
                                     {
@@ -589,22 +644,26 @@ namespace tulkkausPeli
                                 }
                                 else
                                 {
-                                    DeleteWord(0, 3, 30);
-                                    DeleteWord(0, 1, 30);
-                                    Console.SetCursorPosition(0, 3);
-                                    Console.WriteLine("Must be a decimal.");
+                                    if (input == "")
+                                    {
+                                        break;
+                                    }
+                                    DeleteWord(0, errorLine, 30);
+                                    DeleteWord(0, userResponseLine, 30);
+                                    WriteXY(xMargin, errorLine, "Must be a decimal.", baseTextColor);
                                 }
                             }
                         }
                         else if (optionsSelection == 3)
                         {
                             Console.Clear();
-                            Console.WriteLine("Set interval between words in ms (min=1000), currently " + wordInterval);
+                            WriteXY(xMargin, 1, "Set interval between words in ms (min=1000), currently " + wordInterval + ", or return with Enter", baseTextColor);
 
                             while (true)
                             {
-                                Console.SetCursorPosition(0, 1);
-                                if (int.TryParse(Console.ReadLine(), out int newInterval))
+                                Console.SetCursorPosition(xMargin, userResponseLine);
+                                string input = Console.ReadLine();
+                                if (int.TryParse(input, out int newInterval))
                                 {
                                     if (newInterval > 999)
                                     {
@@ -614,17 +673,19 @@ namespace tulkkausPeli
                                         newWordTimer.AutoReset = true;
                                         break;
                                     }
-                                    DeleteWord(0, 3, 30);
-                                    DeleteWord(0, 1, 30);
-                                    Console.SetCursorPosition(0, 3);
-                                    Console.WriteLine("Must be at least 1000");
+                                    DeleteWord(0, errorLine, 30);
+                                    DeleteWord(0, userResponseLine, 30);
+                                    WriteXY(xMargin, errorLine, "Must be at least 1000", baseTextColor);
                                 }
                                 else
                                 {
-                                    DeleteWord(0, 3, 30);
-                                    DeleteWord(0, 1, 30);
-                                    Console.SetCursorPosition(0, 3);
-                                    Console.WriteLine("Must be an integer.");
+                                    if(input == "")
+                                    {
+                                        break;
+                                    }
+                                    DeleteWord(0, userResponseLine, 30);
+                                    DeleteWord(0, errorLine, 30);
+                                    WriteXY(xMargin, errorLine, "Must be an integer.", baseTextColor);
                                 }
                                 
                             }
@@ -632,29 +693,31 @@ namespace tulkkausPeli
                         else if (optionsSelection == 4)
                         {
                             Console.Clear();
-                            Console.WriteLine("Set amount of total words to appear (min=1), currently " + wordsToPlay);
+                            WriteXY(xMargin, 1, "Set amount of total words to appear (min=1), currently " + wordsToPlay + ", or return with Enter", baseTextColor);
                             while (true)
                             {
-                                Console.SetCursorPosition(0, 1);
-                                if (int.TryParse(Console.ReadLine(), out int newWordTotal))
+                                Console.SetCursorPosition(xMargin, userResponseLine);
+                                string input = Console.ReadLine();
+                                if (int.TryParse(input, out int newWordTotal))
                                 {
                                     if (newWordTotal > 0)
                                     {
                                         wordsToPlay = newWordTotal;
                                         break;
                                     }
-                                    DeleteWord(0, 3, 30);
-                                    DeleteWord(0, 1, 30);
-                                    Console.SetCursorPosition(0, 3);
-                                    Console.WriteLine("Must be over 0");
+                                    DeleteWord(0, errorLine, 30);
+                                    DeleteWord(0, userResponseLine, 30);
+                                    WriteXY(xMargin, errorLine, "Must be over 0", baseTextColor);
                                 }
                                 else
                                 {
-                                    
-                                    DeleteWord(0, 3, 30);
-                                    DeleteWord(0, 1, 30);
-                                    Console.SetCursorPosition(0, 3);
-                                    Console.WriteLine("Must be an integer.");
+                                    if (input == "")
+                                    {
+                                        break;
+                                    }
+                                    DeleteWord(0, errorLine, 30);
+                                    DeleteWord(0, userResponseLine, 30);
+                                    WriteXY(xMargin, errorLine, "Must be an integer.", baseTextColor);
                                 }
                             }
                         }
@@ -826,7 +889,7 @@ namespace tulkkausPeli
 
         static void Main(string[] args)
         {
-            
+
             Console.OutputEncoding = System.Text.Encoding.Unicode;
 
             countdownList.Add(countdown3);
@@ -836,6 +899,8 @@ namespace tulkkausPeli
 
             IntPtr ptr = GetConsoleWindow();
             MoveWindow(ptr, 0, 0, 100, 100, true);
+            
+            Console.SetBufferSize(100, Console.WindowHeight + 1);
             Console.SetWindowPosition(0, 0);
             DisableQuickEdit();
 

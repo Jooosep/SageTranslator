@@ -22,9 +22,10 @@ namespace tulkkausPeli
         }
         public override string ToString()
         {
-            string str = description + "\n"
-                + "source language: " + source + "\n"
-                + "destination language: " + dest + "\n"
+            string margin = "     ";
+            string str = description + "\n" + margin
+                + "source language: " + source + "\n" + margin
+                + "destination language: " + dest + "\n" + margin
                 + "dictionary length: " + words.Count + " words\n";
             return str;
         }

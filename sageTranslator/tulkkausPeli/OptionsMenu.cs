@@ -21,9 +21,11 @@ namespace tulkkausPeli
         public int Poll()
         {
             Console.Clear();
+            Console.SetCursorPosition(Program.xMargin, 1);
             Console.WriteLine(titleString);
             for (int i = 0; i < optionStrings.Length; i++)
             {
+                Console.SetCursorPosition(Program.xMargin, Console.CursorTop);
                 Console.WriteLine((i + 1) + ": " + optionStrings[i]);
             }
             while (true)

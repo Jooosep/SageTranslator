@@ -1,8 +1,8 @@
 #Here you can set wordInterval in ms, for example <wordInterval=10000>, default is 5000, min 1000
 #fallSpeed in a decimal number with one decimal, e.g. <fallSpeed=0.1>, default is 0.2, max 1.0
 #lives at the start of a game, e.g. <lives=20>, default is 10
-#max words during single game, e.g. <maxWords=50>, default is 100
-wordInterval=1740
+#maxWords during single game, e.g. <maxWords=50>, default is 100
+wordInterval=4000
 fallSpeed=0,2
-lives=20
+lives=10
 maxWords=100
